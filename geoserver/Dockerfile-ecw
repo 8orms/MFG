@@ -1,0 +1,37 @@
+FROM tomcat:9-jdk11
+
+# Переменные среды для настройки
+ENV GEOSERVER_VERSION=2.20.4
+ENV GEOSERVER_DATA_DIR=/opt/geoserver/data_dir
+ENV GEOSERVER_INSTALL_DIR=/opt/geoserver
+ENV JAVA_OPTS="-Xms1024m -Xmx4096m -XX:MaxPermSize=512m -XX:+UseParallelGC -XX:+UseParallelOldGC"
+
+# Установка необходимых пакетов
+RUN apt-get update && apt-get install -y \
+    wget \
+    unzip \
+    && rm -rf /var/lib/apt/lists/*
+
+# Создание директорий
+RUN mkdir -p ${GEOSERVER_INSTALL_DIR} \
+    && mkdir -p ${GEOSERVER_DATA_DIR}
+
+# Загрузка и установка GeoServer
+RUN cd /tmp \
+    && wget https://sourceforge.net/projects/geoserver/files/GeoServer/${GEOSERVER_VERSION}/geoserver-${GEOSERVER_VERSION}-war.zip \
+    && unzip geoserver-${GEOSERVER_VERSION}-war.zip \
+    && rm -rf /usr/local/tomcat/webapps/* \
+    && unzip -d /usr/local/tomcat/webapps/geoserver geoserver.war \
+    && rm geoserver.war geoserver-${GEOSERVER_VERSION}-war.zip
+
+# Настройка прав доступа
+RUN chmod -R 755 ${GEOSERVER_INSTALL_DIR} \
+    && chmod -R 755 ${GEOSERVER_DATA_DIR} \
+    && chmod -R 755 /usr/local/tomcat/webapps/geoserver
+
+# Копирование скриптов инициализации
+COPY ./geoserver/scripts /docker-entrypoint.d/
+
+EXPOSE 8080
+
+CMD ["catalina.sh", "run"] 

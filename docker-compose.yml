@@ -1,0 +1,126 @@
+version: '3.8'
+
+services:
+  postgis:
+    build:
+      context: ./docker/postgis
+      dockerfile: Dockerfile
+    environment:
+      - POSTGRES_DB=gis
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - LANG=en_US.utf8
+      - LC_ALL=en_US.utf8
+    ports:
+      - "5432:5432"
+    networks:
+      - gis_network
+    volumes:
+      - ./postgis/init:/docker-entrypoint-initdb.d
+      - postgis-data:/var/lib/postgresql/data
+
+  elasticsearch:
+    image: elasticsearch:7.17.9
+    environment:
+      - node.name=geonetwork-es
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - "ES_JAVA_OPTS=-Xms512m -Xmx1024m"
+    ports:
+      - "9200:9200"
+    networks:
+      - gis_network
+    volumes:
+      - elasticsearch-data:/usr/share/elasticsearch/data
+
+  geoserver_ecw:
+    image: urbanits/geoserver:master
+    environment:
+      - GEOSERVER_DATA_DIR=/opt/geoserver/data_dir
+      - LANG=en_US.UTF-8
+      - LC_ALL=en_US.UTF-8
+      - LANGUAGE=en_US:en
+    ports:
+      - "8081:8080"
+    networks:
+      - gis_network
+    volumes:
+      - ./data/geoserver-data/ecw:/opt/geoserver/data_dir
+      - ./data/raster-storage:/opt/geoserver/data_dir/raster-data:ro
+      - ./data/user_projections:/opt/geoserver/data_dir/user_projections
+
+  geoserver_vector:
+    image: kartoza/geoserver:2.25.2
+    environment:
+      - GEOSERVER_DATA_DIR=/opt/geoserver/data_dir
+      - GEOSERVER_ADMIN_USER=admin
+      - GEOSERVER_ADMIN_PASSWORD=geoserver
+      - INITIAL_MEMORY=2G
+      - MAXIMUM_MEMORY=4G
+      - STABLE_EXTENSIONS=vectortiles-plugin,wps-plugin,printing-plugin
+    ports:
+      - "8082:8080"
+    networks:
+      - gis_network
+    volumes:
+      - ./data/geoserver-data/vector:/opt/geoserver/data_dir
+      - ./data/user_projections:/opt/geoserver/data_dir/user_projections
+
+  geonetwork:
+    image: geonetwork:4.2.2
+    environment:
+      - DATA_DIR=/catalogue-data
+      - POSTGRES_DB_USERNAME=postgres
+      - POSTGRES_DB_PASSWORD=postgres
+      - POSTGRES_DB_HOST=postgis
+      - POSTGRES_DB_PORT=5432
+      - POSTGRES_DB_NAME=gis
+      # Elasticsearch configuration
+      - ES_HOST=elasticsearch
+      - ES_PORT=9200
+      - ES_PROTOCOL=http
+      # Настройки для интеграции с GeoServer
+      - GN_CONFIG_GEOSERVER_VECTOR_URL=http://localhost/geoserver-vector
+      - GN_CONFIG_GEOSERVER_ECW_URL=http://localhost/geoserver-ecw
+      # Настройки Java
+      - JAVA_OPTS=-Xms512M -Xmx1G
+    ports:
+      - "8083:8080"
+    networks:
+      - gis_network
+    volumes:
+      - geonetwork-data:/catalogue-data
+      # Монтируем директорию для пользовательских настроек
+      - ./data/geonetwork/config:/opt/geonetwork/custom
+    depends_on:
+      - postgis
+      - elasticsearch
+      - geoserver_vector
+      - geoserver_ecw
+
+  nginx:
+    build:
+      context: ./docker/nginx
+      dockerfile: Dockerfile
+    ports:
+      - "80:80"
+    networks:
+      - gis_network
+    depends_on:
+      - geoserver_ecw
+      - geoserver_vector
+      - geonetwork
+    volumes:
+      - ./docker/nginx/conf:/etc/nginx/conf.d:ro
+
+networks:
+  gis_network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 192.168.100.0/24
+
+volumes:
+  postgis-data:
+  geonetwork-data:
+  elasticsearch-data:

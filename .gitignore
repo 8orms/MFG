@@ -1,0 +1,38 @@
+# Data directories
+data/postgis/*
+data/geoserver-data/*
+data/raster-storage/*
+
+# Environment variables and sensitive data
+.env
+*.env
+docker/geoserver-ecw/ecw-license/*
+
+# IDE and editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Logs
+*.log
+logs/
+log/
+
+# System files
+.DS_Store
+Thumbs.db
+
+# Docker volumes
+docker-volumes/
+
+# Temporary files
+*.tmp
+*.temp
+temp/
+
+# Keep .gitkeep files
+!data/postgis/.gitkeep
+!data/geoserver-data/.gitkeep
+!data/raster-storage/.gitkeep
+!docker/geoserver-ecw/ecw-license/.gitkeep
