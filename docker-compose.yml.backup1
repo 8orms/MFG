@@ -1,0 +1,196 @@
+services:
+  postgis:
+    build:
+      context: ./docker/postgis
+      dockerfile: Dockerfile
+    environment:
+      - POSTGRES_DB=gis
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - LANG=en_US.utf8
+      - LC_ALL=en_US.utf8
+    ports:
+      - "5432:5432"
+    networks:
+      - gis_network
+    volumes:
+      - ./postgis/init:/docker-entrypoint-initdb.d
+      - postgis-data:/var/lib/postgresql/data
+
+  elasticsearch:
+    image: elasticsearch:7.17.9
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=true
+      - ELASTIC_PASSWORD=changeme
+      - "ES_JAVA_OPTS=-Xms2g -Xmx2g"
+      - bootstrap.memory_lock=true
+      - network.host=0.0.0.0
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 65536
+        hard: 65536
+    ports:
+      - "9200:9200"
+    networks:
+      - gis_network
+    volumes:
+      - elasticsearch-data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9200/_cluster/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  kibana:
+    image: kibana:7.17.9
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+      - ELASTICSEARCH_USERNAME=elastic
+      - ELASTICSEARCH_PASSWORD=changeme
+    ports:
+      - "5601:5601"
+    networks:
+      - gis_network
+    depends_on:
+      - elasticsearch
+
+  geoserver-ecw:
+    image: urbanits/geoserver:master
+    environment:
+      - GEOSERVER_DATA_DIR=/opt/geoserver/data_dir
+      - LANG=en_US.UTF-8
+      - LC_ALL=en_US.UTF-8
+      - LANGUAGE=en_US:en
+      - CATALINA_OPTS=-Dorg.geoserver.web.proxy.base=http://localhost/geoserver-ecw
+    ports:
+      - "8081:8080"
+    networks:
+      - gis_network
+    volumes:
+      - ./data/geoserver-data/ecw:/opt/geoserver/data_dir
+      - ./data/raster-storage:/opt/geoserver/data_dir/raster-data:ro
+      - ./data/user_projections:/opt/geoserver/data_dir/user_projections
+      - ./data/geoserver-cache:/opt/geoserver/data_dir/gwc
+
+  geoserver-vector:
+    image: kartoza/geoserver:2.25.2
+    environment:
+      - GEOSERVER_DATA_DIR=/opt/geoserver/data_dir
+      - GEOSERVER_ADMIN_USER=admin
+      - GEOSERVER_ADMIN_PASSWORD=geoserver
+      - INITIAL_MEMORY=2G
+      - MAXIMUM_MEMORY=4G
+      - STABLE_EXTENSIONS=vectortiles-plugin,wps-plugin,printing-plugin
+      - CATALINA_OPTS=-Dorg.geoserver.web.proxy.base=http://localhost/geoserver-vector
+    ports:
+      - "8082:8080"
+    networks:
+      - gis_network
+    volumes:
+      - ./data/geoserver-data/vector:/opt/geoserver/data_dir
+      - ./data/user_projections:/opt/geoserver/data_dir/user_projections
+      - ./data/geoserver-cache:/opt/geoserver/data_dir/gwc
+
+  geonetwork:
+    image: geonetwork:4.2.2
+    environment:
+      - DATA_DIR=/catalogue-data
+      - POSTGRES_DB_USERNAME=postgres
+      - POSTGRES_DB_PASSWORD=postgres
+      - POSTGRES_DB_HOST=postgis
+      - POSTGRES_DB_PORT=5432
+      - POSTGRES_DB_NAME=gis
+      # Elasticsearch configuration
+      - ES_HOST=elasticsearch
+      - ES_PORT=9200
+      - ES_PROTOCOL=http
+      # Настройки для интеграции с GeoServer
+      - GN_CONFIG_GEOSERVER_VECTOR_URL=http://geoserver-vector:8080
+      - GN_CONFIG_GEOSERVER_ECW_URL=http://geoserver-ecw:8080
+      # Настройки Java
+      - JAVA_OPTS=-Xms1G -Xmx2G
+    ports:
+      - "8083:8080"
+    networks:
+      - gis_network
+    volumes:
+      - geonetwork-data:/catalogue-data
+      # Монтируем директорию для пользовательских настроек
+      - ./data/geonetwork/config:/opt/geonetwork/custom
+    depends_on:
+      - postgis
+      - elasticsearch
+      - geoserver-vector
+      - geoserver-ecw
+
+  nginx:
+    build:
+      context: ./docker/nginx
+      dockerfile: Dockerfile
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./docker/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./logs/nginx:/var/log/nginx
+    depends_on:
+      - geoserver-vector
+      - geoserver-ecw
+      - geonetwork
+    networks:
+      - gis_network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  filebeat:
+    image: docker.elastic.co/beats/filebeat:7.17.9
+    volumes:
+      - ./docker/filebeat/filebeat.yml:/usr/share/filebeat/filebeat.yml:ro
+      - ./logs/nginx:/var/log/nginx:ro
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+    networks:
+      - gis_network
+    depends_on:
+      - elasticsearch
+      - nginx
+
+  metricbeat:
+    image: docker.elastic.co/beats/metricbeat:7.17.9
+    volumes:
+      - ./docker/metricbeat/metricbeat.yml:/usr/share/metricbeat/metricbeat.yml:ro
+      - ./docker/metricbeat/modules.d:/usr/share/metricbeat/modules.d:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+      - KIBANA_HOST=http://kibana:5601
+    networks:
+      - gis_network
+    depends_on:
+      - elasticsearch
+      - kibana
+      - nginx
+
+networks:
+  gis_network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 192.168.100.0/24
+
+volumes:
+  postgis-data:
+  geonetwork-data:
+  elasticsearch-data:

@@ -1,38 +1,32 @@
-# Data directories
-data/postgis/*
-data/geoserver-data/*
-data/raster-storage/*
+# Игнорировать всё содержимое папки data
+data/*
 
-# Environment variables and sensitive data
+# Исключить файлы .gitkeep из игнорируемых
+!data/**/.gitkeep
+
+# Игнорировать окружения
 .env
 *.env
-docker/geoserver-ecw/ecw-license/*
 
-# IDE and editor files
+# Игнорировать файлы IDE и редакторов
 .idea/
 .vscode/
 *.swp
 *.swo
 
-# Logs
+# Игнорировать логи
 *.log
 logs/
 log/
 
-# System files
+# Игнорировать системные файлы
 .DS_Store
 Thumbs.db
 
-# Docker volumes
+# Игнорировать Docker volume
 docker-volumes/
 
-# Temporary files
+# Игнорировать временные файлы
 *.tmp
 *.temp
 temp/
-
-# Keep .gitkeep files
-!data/postgis/.gitkeep
-!data/geoserver-data/.gitkeep
-!data/raster-storage/.gitkeep
-!docker/geoserver-ecw/ecw-license/.gitkeep
